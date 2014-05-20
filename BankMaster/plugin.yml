@@ -1,0 +1,34 @@
+name: BankMaster
+main: com.github.JohnGuru.BankMaster.BankMaster
+version: 1.1
+description: General manager for bank accounts
+author: JohnGuru
+commands:
+  bank:
+    description: Display account balance
+    usage: /<command> | /<command> pay <player> <amount>
+    permission: bankmaster.use
+  audit:
+    description: Display account status
+    usage: /<command> <player>
+    permission: bankmaster.admin
+  deposit:
+    description: Add a specified amount to a player's bank balance
+    usage: /<command> <player> <amount>
+    permission: bankmaster.admin
+  deduct:
+    description: Subtract a specified amount from a player's bank balance
+    usage: /<command> <player> <amount>
+    permission: bankmaster.admin
+  setmoney:
+    description: Set the bank balance to a specified amount, overrides current contents
+    usage: /<command> <player> <amount>
+    permission: bankmaster.admin
+    
+permissions:
+  bankmaster.use:
+    description: can use bank command
+    default: true
+  bankmaster.admin:
+    description: can use administrator commands
+    default: op 
