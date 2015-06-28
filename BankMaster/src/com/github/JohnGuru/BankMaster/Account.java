@@ -4,16 +4,15 @@ import java.io.File;
 import java.io.IOException;
 import java.util.logging.Level;
 
-import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 
 public class Account implements InventoryHolder {
-	private OfflinePlayer owner;
+	private String name;
+	private String uuid;
 	long	lastUpdate;	// getTime() value of date&time of last interest update
 	double	money;
 	double	loans;
@@ -25,14 +24,16 @@ public class Account implements InventoryHolder {
 	private File configFile;
 	
 	// key names
+	private static final String keyName = "player";
 	private static final String keyUpdate = "bank.lastUpdate";
 	private static final String keyMoney = "bank.money";
 	private static final String keyXP = "bank.XP";
 	private static final String keyLoans = "bank.loans";
 
 	// Constructor for new account for Player P
-	public Account(OfflinePlayer p) {
-		owner = p;
+	public Account(String pname, String uid) {
+		name = pname;
+		uuid = uid;
 		lastUpdate = 0;
 		money = 0;
 		loans = 0;
@@ -46,10 +47,7 @@ public class Account implements InventoryHolder {
 	 * Required methods for InventoryHolder
 	 */
 	public Inventory getInventory() {
-		if (owner instanceof Player)
-			inventory = ((Player) owner).getServer().createInventory(this, 27, "Account $" + money);
-		else
-			inventory = null;
+		inventory = BankMaster.plugin.getServer().createInventory(this, 27, "Account $" + money);
 		return inventory;
 	}
 	
@@ -58,7 +56,11 @@ public class Account implements InventoryHolder {
 	 */
 	public void openAccount() {
 		if (configFile == null) {
-			configFile = new File(BankMaster.ourDataFolder, owner.getName() + ".yml");
+			configFile = new File(BankMaster.ourDataFolder, uuid + ".yml");
+			if (!configFile.exists()) {
+				// Maybe there's a config using player name
+				configFile = new File(BankMaster.ourDataFolder, name + ".yml");
+			}
 		}
 		if (config == null) {
 			config = YamlConfiguration.loadConfiguration(configFile);
@@ -76,15 +78,20 @@ public class Account implements InventoryHolder {
 	 * Write the account - saves the current account data to disk
 	 */
 	public void pushAccount() {
-		if (configFile == null || config == null) {
+		if (configFile == null) {
 			// this account was never opened, so nothing to do
 			return;
 		}
+		
 		// update config file values
+		config.set(keyName, name);
 		config.set(keyUpdate, lastUpdate);
 		config.set(keyMoney, money);
 		config.set(keyLoans, loans);
 		config.set(keyXP, XP);
+
+		// during transition phase, the active File might be based on player name
+		configFile = new File(BankMaster.ourDataFolder, uuid + ".yml");
 		
 		try {
 	        config.save(configFile);
@@ -95,24 +102,9 @@ public class Account implements InventoryHolder {
 	}
 	
 	// general handling functions
-	public OfflinePlayer getOwner() {
-		return owner;
-	}
 	
-	public boolean isFor(OfflinePlayer p) {
-		return (owner.equals(p) );
-	}
-	
-	public double getMoney() {
-		return money;
-	}
-	
-	public double getLoans() {
-		return loans;
-	}
-	
-	public int getXP() {
-		return XP;
+	public boolean isFor(String suid) {
+		return (uuid.equals(suid) );
 	}
 	
 	public void clear() {
@@ -144,6 +136,7 @@ public class Account implements InventoryHolder {
 	
 	public boolean repay(double amt) {
 		if (amt <= loans) {
+			money -= amt;
 			loans -= amt;
 			return true;
 		}

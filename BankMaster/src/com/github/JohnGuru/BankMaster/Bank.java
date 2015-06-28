@@ -1,17 +1,26 @@
 package com.github.JohnGuru.BankMaster;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.PrintStream;
 import java.util.Date;
-import java.util.Formatter;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
-
 import org.bukkit.ChatColor;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.entity.Player;
 
 public class Bank {
+	private Map<String, Object> names;
 	private List<Account> accounts;
+	private boolean newNames;	// true if name list needs to be rewritten to config file
+	private boolean namesLogging;
 	double	rate;			// interest rate, money*rate
 	double	maxMoney;		// max size of a bank account
 	double	maxLoans;		// total amount the bank can loan
@@ -20,6 +29,9 @@ public class Bank {
 	public Bank() {
 		// Initialize the bank management parameters to defaults
 		// Custom values will be set from a config.yml later
+		newNames = false;
+		namesLogging = true;
+		names = null;
 		accounts = new LinkedList<Account>();
 		rate = 0;			// by default, interest is disabled
 		maxLoans = 0;		// by default, the bank can't loan money
@@ -27,23 +39,27 @@ public class Bank {
 		maxMoney = 10000000;  // default max account size
 	}
 	
-	private Account findAccount(OfflinePlayer p) {
-		// If the account is in memory, return it
-		for ( Account a : accounts) {
-			if (a.isFor(p))
-				return a;
-		}
-		// spawn a new account object with default values
-		Account acct = new Account(p);
-		// load account status from yml file, if it exists
-		acct.openAccount();
-		// append to the bank list
-		if (accounts.add(acct))
-			return acct;
-		return null;
-	}
-	
 	// Methods to set custom bank behavior from a config.yml
+	
+	/*
+	 * Account names
+	 * 		A table cross-referencing "official" player names to UUID values,
+	 * 		used by bank admin commands
+	 */
+	public void loadNames() {
+		ConfigurationSection section = BankMaster.plugin.getConfig().getConfigurationSection("names");
+		if (section == null)
+			names = new HashMap<String,Object>();
+		else
+			names = section.getValues(false);
+		newNames = false;
+	}
+		
+	public boolean saveNames() {
+		if (newNames)
+			BankMaster.plugin.getConfig().createSection("names", names);
+		return newNames;
+	}
 	
 	/*
 	 * Daily interest rate is computed as the compounding rate that will
@@ -83,24 +99,86 @@ public class Bank {
 	}
 	
 	/*
-	 * GetAccount
-	 * 		applies accrued interest before any actions on the account
+	 * findAccount
+	 * 		Returns the requested account if in the in-memory list,
+	 * 		otherwise reads the account.yml file and adds to the list
 	 */
-	public Account getAccount(CommandSender sender, String name ) {
-		OfflinePlayer player = BankMaster.plugin.getServer().getOfflinePlayer(name);
-		// A non-existing player is one who has never played before and is not online
-		if (player.getFirstPlayed() == 0 && !player.isOnline())
-			return null;
-		return getAccount(sender, player);
+	
+	private Account findAccount(String name, String uid) {
+		// If the account is in memory, return it
+		for ( Account a : accounts) {
+			if (a.isFor(uid))
+				return a;
+		}
+		// spawn a new account object with default values
+		Account acct = new Account(name, uid);
+		// load account status from yml file, if it exists
+		acct.openAccount();
+		// append to the bank list
+		if (accounts.add(acct))
+			return acct;
+		return null;
 	}
 	
-	public Account getAccount(CommandSender sender, OfflinePlayer p) {
-		Account a = findAccount(p);
+	/*
+	 * getAccount applies pending interest to the player's account,
+	 * but only when accessed by the player, not an admin
+	 */
+	public Account getAccount(String name) {
+		String uid = (String)names.get(name);
+		if (uid == null)
+			return null;
+		return findAccount(name, uid);
+	}
+	
+	/*
+	 * The names list has to be updated to contain this name-UUID pair.
+	 * If it already has an entry for this playerName with a different UUID,
+	 * the mapping will be updated to remember this new instance.
+	 * We don't attempt to resolve different users with the same name.
+	 */
+	public Account getAccount(Player p) {
+		String uuid = p.getUniqueId().toString();
+		String other = (String) names.get(p.getName());
+		if (namesLogging) {
+			/*
+			 * following creates a log of names created for the bank
+			 */
+			File log = new File(BankMaster.ourDataFolder, "names.log");
+			FileOutputStream app;
+			try {
+				app = new FileOutputStream(log, true);
+				PrintStream out = new PrintStream(app);
+				if (other == null) {
+					// new definition of a player account
+					out.format("Creating account for %s UUID(%s)\n", p.getName(), uuid);
+				} else if (!uuid.equals(other)) {
+					// redefining this player name
+					out.format("Reassigned name %s to UUID(%s)\n", p.getName(), uuid);
+				}
+				out.flush();
+				app.close();
+			} catch (FileNotFoundException e) {
+				// Note that we cannot maintain the log file and terminate logging
+				BankMaster.plugin.getLogger().log(Level.WARNING, "Cannot write names.log");
+				namesLogging = false;
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				BankMaster.plugin.getLogger().log(Level.SEVERE, "Error writing names.log");
+			}
+		}
+		if (other == null || !uuid.equals(other)) {
+			newNames = true;
+			names.put(p.getName(), uuid);
+		}
+		Account a = findAccount(p.getName(), uuid);
 		if (a != null) {
-			// update account with pending interest
+
+			// update Account with pending interest
+
 			Date today = new Date();
 			long now = today.getTime() / 86400000 ;
-			/* 'period' is an integral number of days since epoch.
+			/* 'now' is an integral number of days since epoch.
 			 * There are 86,400 seconds in a day, and 1000 'ticks' in a getTime() value.
 			 * Interest is considered to compound at midnight
 			 */
@@ -118,11 +196,8 @@ public class Bank {
 					pennies = (long)((newamt + 0.005) * 100.0);
 					a.money = (double)pennies / 100.0;
 					double interest = a.money - oldamt;
-					StringBuilder sb = new StringBuilder();
-					Formatter f = new Formatter(sb);
-					f.format("Interest applied: %.2f", interest);
-					BankMaster.msg(sender, ChatColor.YELLOW, f.toString());
-					f.close();
+					
+					BankMaster.msg(p, ChatColor.YELLOW, String.format("Interest applied: %.2f", interest));
 					
 				}
 			}
@@ -137,8 +212,8 @@ public class Bank {
 	 * Transactional methods
 	 */
 	
-	public void audit( CommandSender sender, String name ) {
-		Account a = getAccount(sender, name);
+	public void audit(CommandSender sender, String name ) {
+		Account a = getAccount(name);
 		if (a == null) {
 			sender.sendMessage(ChatColor.RED + name + " is not a valid player name");
 			return;

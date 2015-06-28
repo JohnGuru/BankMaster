@@ -1,7 +1,7 @@
 package com.github.JohnGuru.BankMaster;
 
 import java.io.File;
-import java.util.Formatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Hashtable;
@@ -17,6 +17,7 @@ import org.bukkit.block.Sign;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -29,27 +30,36 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class BankMaster extends JavaPlugin {
 	public static File ourDataFolder;
 	public static JavaPlugin plugin;
+	
+	// the bank object collects functionality applying to all accounts
 	public Bank bank = null;
+	
+	// the signList gives the world locations of all active bank signs
 	public Map<Location,String> signList;
+	private boolean signListChanged; // if true, the list has to be written out
+	
+	// the currency collection identifies the types of currencies in use
 	public Map<Material,Double> currency; // Types of currency items and their scaling values
-	private boolean signListChanged;
 	
 	private static String money_sign;
 	private static final String default_money_sign = "Money Bank";
 	//private static String xp_sign;
 	//private static final String default_xp_sign = "XP Bank";
 	
-	private static final String key_moneysign = "bank.moneySign";
-	private static final String key_xpsign = "bank.XPSign";
-	
+	//permissions strings
 	private static final String admin = "bankmaster.admin";
 	private static final String user = "bankmaster.use";
+	
+	//config keys
+	private static final String key_moneysign = "bank.moneySign";
+	private static final String key_xpsign = "bank.XPSign";
 	private static final String interestDays = "bank.interestDays";
 	private static final String maxLoans = "bank.maxLoans";
 	private static final String maxSingleLoan = "bank.maxSingleLoan";
@@ -59,10 +69,15 @@ public final class BankMaster extends JavaPlugin {
 	private static String bank_command = "bank";
 	private static String pay_command = "pay";
 	private static String audit = "audit";
-	private static String deposit = "deposit";
-	private static String deduct = "deduct";
-	private static String setmoney = "setmoney";
+	private static String master = "bankmaster";
+	private static String add_cmd = "add";
+	private static String rem_cmd = "rem";
+	private static String set_cmd = "set";
 	// private static String setXP = "setxp";
+	
+	// ItemMeta name and lore strings
+	private static String meta_Borrow = "Borrow";
+	private static String meta_Repay = "Repay";
 	
 	
 	@Override
@@ -95,7 +110,7 @@ public final class BankMaster extends JavaPlugin {
 		
 		signList = new Hashtable<Location,String>(25);
 		signListChanged = false;
-		// if we're going to re-process the sign list in the config.yml, we have to clear it first
+		// if the plugin is reloaded, we have to discard the current signList
 		
 		List<String> signspec = conf.getStringList(banksigns);
 		if (!signspec.isEmpty()) {
@@ -117,6 +132,9 @@ public final class BankMaster extends JavaPlugin {
 			getLogger().info("opened " + valid_signs + " bank signs");
 		}
 		
+		// finally, load the current bank account name-UUID table
+		bank.loadNames();
+		
 		// Start listeners on sign click
 		getServer().getPluginManager().registerEvents(new SignListener(), this);
 
@@ -124,6 +142,7 @@ public final class BankMaster extends JavaPlugin {
 	
 	@Override
 	public void onDisable() {
+		boolean rewriteConfig = false;
 		
 		// Update config with new bank signs
 		
@@ -131,8 +150,15 @@ public final class BankMaster extends JavaPlugin {
 			String[] signs = new String[signList.size()];
 			signList.values().toArray(signs);
 			getConfig().set(banksigns, signs);
-			saveConfig();
+			rewriteConfig = true;
 		}
+		
+		if (bank.saveNames()) {
+			rewriteConfig = true;
+		}
+		
+		if (rewriteConfig)
+			saveConfig();
 		
 		ourDataFolder = null;
 		currency = null;
@@ -184,18 +210,71 @@ public final class BankMaster extends JavaPlugin {
 		
 		@EventHandler
 		public void clickItemstack(InventoryClickEvent ev) {
-			
+			/*
+			 * two possible outcomes here:
+			 * user has clicked an empty stack or a currency item: allow the click
+			 * user has clicked an unrecognized item type: disable the click so he can't manipulate the itemstack
+			 * user has clicked a Borrow block: put emerald blocks up to maxSingleLoan on the curosr
+			 * user has clicked a Repay block: deduct cursor emeralds from loans
+			 */
 			if (ev.getInventory().getHolder() instanceof Account) {
 				ItemStack item = ev.getCurrentItem();
-				if (item != null && (item.getType() != Material.AIR) && !currency.containsKey(item.getType())) {
-					ev.setCancelled(true);
+				if (item == null)
+					return; // shouldn't happen but let's be safe
+				Material itemtype = item.getType();
+				if (itemtype == Material.AIR || currency.containsKey(itemtype))
 					return;
+
+				// process click on Borrow block
+				if (itemtype == Material.WOOL && item.hasItemMeta()) {
+					ItemMeta meta = item.getItemMeta();
+					if (meta.hasDisplayName() && meta.getDisplayName().equals(meta_Borrow)) {
+						int nblocks = (int)bank.maxSingleLoan / 9;
+						if (nblocks > 64)
+							nblocks = 64;
+						ItemStack borrowed = new ItemStack(Material.EMERALD_BLOCK, nblocks);
+						ev.setCursor(borrowed);
+						Account a = (Account)ev.getInventory().getHolder();
+						a.loans += nblocks * 9;
+						
+						ev.setCancelled(true); // handled, don't modify the wool block
+						return;
+					}
 				}
-				item = ev.getCursor();
-				if (item != null && (item.getType() != Material.AIR) && !currency.containsKey(item.getType())) {
-					ev.setCancelled(true);
-					return;
+				
+				if (itemtype == Material.WOOL && item.hasItemMeta()) {
+					ItemMeta meta = item.getItemMeta();
+					if (meta.hasDisplayName() && meta.getDisplayName().equals(meta_Repay)) {
+						ItemStack cursor = ev.getCursor();
+						ItemStack empty = new ItemStack(Material.AIR);
+						
+						if (currency.containsKey(cursor.getType())) {
+							Account a = (Account)ev.getInventory().getHolder();
+							double worth = currency.get(cursor.getType());
+							double value = worth * cursor.getAmount();
+							if (value > a.loans) {
+								int excess = (int)((value - a.loans) / worth);
+								value = a.loans;
+								cursor.setAmount(excess);
+								ev.setCursor(cursor);
+							} else
+								ev.setCursor(empty);
+								
+							HumanEntity clicker = ev.getWhoClicked();
+							if (clicker instanceof Player)
+								msg((Player)clicker, ChatColor.YELLOW, "Repaid $" + value);
+							a.loans -= value;
+							ev.setCancelled(true); // handled, don't modify the wool block
+							return;
+						}
+					}
+
 				}
+			/*
+			 * we don't recognize this type of item, so ignore the click, player can't manipulate it
+			 * in an account inventory
+			 */
+			ev.setCancelled(true);
 			}
 			
 		}
@@ -257,11 +336,11 @@ public final class BankMaster extends JavaPlugin {
 	 */
 	private void MoneyBank(Player p) {
 		// Access the required account. If none exists, we get an account with zero contents
-		Account a = bank.getAccount(p, p);
+		Account a = bank.getAccount(p);
 		Inventory inv = a.getInventory();
 		
 		// now load the inventory with a portion of the account
-		long rem = (long)a.getMoney();
+		long rem = (long)a.money;
 		
 		// Limit the displayed funds to 8 stacks of emerald blocks
 		
@@ -287,6 +366,32 @@ public final class BankMaster extends JavaPlugin {
 			rem -= bump;
 		}
 		
+		// Add special block to borrow money - red wool
+		if (a.loans < bank.maxLoans) {
+			ItemStack block = new ItemStack(Material.WOOL, 1, (short)14);
+			ItemMeta meta = block.getItemMeta();
+			List<String> lores = new ArrayList<String>();
+			lores.add("Borrow $" + bank.maxSingleLoan);
+	
+			meta.setDisplayName(meta_Borrow);
+			meta.setLore(lores);
+			block.setItemMeta(meta);
+			inv.setItem(20, block);
+		}
+		
+		// Add special block to repay loans
+		if (a.loans > 0) {
+			ItemStack block = new ItemStack(Material.WOOL, 1, (short)5);
+			ItemMeta meta = block.getItemMeta();
+			List<String> lores = new ArrayList<String>();
+			lores.add("Make a loan payment");
+	
+			meta.setDisplayName(meta_Repay);
+			meta.setLore(lores);
+			block.setItemMeta(meta);
+			inv.setItem(21, block);			
+		}
+		
 		// now display the space and let the user update it
 		// InventoryView workspace = p.openInventory(work);
 		p.openInventory(inv);
@@ -309,13 +414,17 @@ public final class BankMaster extends JavaPlugin {
 	 */
 	public boolean onCommand(CommandSender sender,
 			Command cmd, String label, String[] args) {
-		Player thisPlayer;
 		
 		if (sender instanceof Player) {
-			thisPlayer = (Player)sender;
+			Player thisPlayer = (Player)sender;
 			// Only player commands
 			
 			/********** Bank Command *************************************************/
+			
+			/*
+			 * a player can invoke player commands (with bankmaster.use permission)
+			 * or admin commands (with bankmaster.admin permission)
+			 */
 			
 			if (cmd.getName().equalsIgnoreCase(bank_command)) {
 				
@@ -325,12 +434,12 @@ public final class BankMaster extends JavaPlugin {
 					return true;
 				}
 				if (args.length == 0) {
-					Account a = bank.getAccount(sender, thisPlayer);
+					Account a = bank.getAccount(thisPlayer);
 					if (a == null) {
-						thisPlayer.sendMessage(ChatColor.RED + "No bank account found.");
+						thisPlayer.sendMessage(ChatColor.RED + "You have no bank account yet.");
 					}
 					else {
-						thisPlayer.sendMessage(ChatColor.YELLOW + "Balance: " + a.getMoney());
+						thisPlayer.sendMessage(ChatColor.YELLOW + "Balance: " + a.money + ", Loans: " + a.loans);
 						a.pushAccount();
 					}
 					return true;
@@ -361,73 +470,44 @@ public final class BankMaster extends JavaPlugin {
 
 		/********** setmoney Command *************************************************/
 
-		if (cmd.getName().equalsIgnoreCase(setmoney)) {
-			if (args.length != 2) // requires <player> <amount>
+		if (cmd.getName().equalsIgnoreCase(master)) {
+			if (args.length != 3) // requires func <player> <amount>
 				return false; 
-			Account acct = bank.getAccount(sender, args[0]);
+			Account acct = bank.getAccount(args[1]);
 			if (acct == null) {
-				msg(sender, ChatColor.RED, args[0] + " is not a valid account name");
+				msg(sender, ChatColor.RED, args[1] + " is not a valid account name");
 				return true;
 			}
-			double amt = Double.valueOf(args[1]);
-			if (amt > 0) {
+			double amt = Double.valueOf(args[2]);
+			if (amt <= 0) {
+				msg(sender, ChatColor.RED, "Invalid amount, must be greater than 0");
+				return true;
+			}
+			if (args[0].equalsIgnoreCase(set_cmd)) {
 				acct.clear();
 				acct.deposit(amt);
 				acct.audit(sender);
 				acct.pushAccount();
-			} else {
-				msg(sender, ChatColor.RED, "Invalid amount, must be greater than 0");
-			}
-			return true;
-		}
-		
-		/********** deposit Command *************************************************/
-
-		if (cmd.getName().equalsIgnoreCase(deposit)) {
-			if (args.length != 2) // requires <player> <amount>
-				return false; 
-			Account acct = bank.getAccount(sender, args[0]);
-			if (acct == null) {
-				msg(sender, ChatColor.RED, args[0] + " is not a valid account name");
 				return true;
 			}
-			double amt = Double.valueOf(args[1]);
-			if (amt > 0) {
+			
+			if (args[0].equalsIgnoreCase(add_cmd)) {
 				acct.deposit(amt);
 				acct.audit(sender);
 				acct.pushAccount();
-			} else {
-				msg(sender, ChatColor.RED, "Invalid amount, must be greater than 0");
-			}
-
-			return true;
-		}
-		
-		/********** deduct Command *************************************************/
-
-		if (cmd.getName().equalsIgnoreCase(deduct)) {
-			if (args.length != 2) // requires <player> <amount>
-				return false; 
-			Account acct = bank.getAccount(sender, args[0]);
-			if (acct == null) {
-				msg(sender, ChatColor.RED, args[0] + " is not a valid account name");
 				return true;
 			}
-			double amt = Double.valueOf(args[1]);
-			if (amt > 0) {
-				if (acct.withdraw(amt)) {
-					acct.audit(sender);
-					acct.pushAccount();
-				}
-				else
-					msg(sender, ChatColor.RED, "Amount is larger than account balance");
-			} else {
-				msg(sender, ChatColor.RED, "Invalid amount, must be greater than 0");
+			
+			if (args[0].equalsIgnoreCase(rem_cmd)) {
+				acct.withdraw(amt);
+				acct.audit(sender);
+				acct.pushAccount();
+				return true;
 			}
-			return true;
+			
 		}
-		
-		return false;
+			
+		return false; // unrecognized command
 	}
 	
 	public static void msg(CommandSender sender, ChatColor color, String text) {
@@ -493,14 +573,11 @@ public final class BankMaster extends JavaPlugin {
 	
 	private void newBankSign(Sign sign) {
 		Location loc = sign.getLocation();
-		StringBuffer buf = new StringBuffer();
-		Formatter f = new Formatter(buf);
-		f.format("%s,%d,%d,%d", loc.getWorld().getName(), loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
+		String buf = String.format("%s,%d,%d,%d", loc.getWorld().getName(), loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
 				
 		getLogger().info("new bank sign: " + buf);
-		signList.put(loc, buf.toString());
+		signList.put(loc, buf);
 		signListChanged = true;
-		f.close();
 		
 		sign.setMetadata(key_moneysign, new FixedMetadataValue(this, "money"));
 	}

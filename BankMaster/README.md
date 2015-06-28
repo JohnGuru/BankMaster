@@ -12,12 +12,12 @@ Admin Commands:
 	audit <name>
 	Displays the account status for player <name>
 
-	setmoney <name> <amount>
+	bankmaster|master|bm set <name> <amount>
 	Forces the current account value for player <name> to <amount>
 	e.g., /setmoney george 521.50
 	
-	deposit <name> <amount>
+	bankmaster|master|bm add <name> <amount>
 	Adds the specified <amount> to player <name> account
 	
-	deduct <name> <amount>
+	bankmaster|master|bm rem <name> <amount>
 	Removes the specified <amount> from player <name> account
