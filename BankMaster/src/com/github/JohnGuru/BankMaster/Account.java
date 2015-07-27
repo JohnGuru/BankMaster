@@ -2,22 +2,27 @@ package com.github.JohnGuru.BankMaster;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.logging.Level;
+import java.util.UUID;
 
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.Material;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.ItemStack;
 
 public class Account implements InventoryHolder {
 	private String name;
-	private String uuid;
+	private UUID uuid;
 	long	lastUpdate;	// getTime() value of date&time of last interest update
 	double	money;
 	double	loans;
 	int		XP;
-	private Inventory inventory;
+	private Inventory purse;
+	private boolean isCash;
 	
 	// Account state is maintained in an external .yml file
 	private FileConfiguration config;
@@ -31,7 +36,7 @@ public class Account implements InventoryHolder {
 	private static final String keyLoans = "bank.loans";
 
 	// Constructor for new account for Player P
-	public Account(String pname, String uid) {
+	public Account(String pname, UUID uid) {
 		name = pname;
 		uuid = uid;
 		lastUpdate = 0;
@@ -40,15 +45,98 @@ public class Account implements InventoryHolder {
 		XP = 0;
 		config = null;
 		configFile = null;
-		inventory = null;
+		purse = null;
+		isCash = true;
 	}
 	
 	/*
 	 * Required methods for InventoryHolder
 	 */
 	public Inventory getInventory() {
-		inventory = BankMaster.plugin.getServer().createInventory(this, 27, "Account $" + money);
-		return inventory;
+		return purse;
+	}
+	
+	public boolean isCashInventory() {
+		return isCash;
+	}
+	
+	/*
+	 * Create inventory loaded with player's money
+	 * 
+	 */
+	public Inventory setCash() {
+		purse = Bukkit.getServer().createInventory(this, 27, String.format("Account %.2f", money));
+		isCash = true;
+		
+		// Limit the displayed funds to 8 stacks of emerald blocks
+
+		// now load the inventory with a portion of the account
+		long rem = (long)money;
+		
+		if (rem > 4544L) /* 7 stacks of emerald blocks + 8 stacks of emeralds */
+			rem = 4544L;
+		
+		// remove the on-screen amount from the account's balance
+		money -= rem;
+		
+		// now fill 15 slots of inventory
+		for (int slot = 0; rem > 0; slot++) {
+			int bump = 0;
+			if (rem >= 576) {
+				bump = 576;
+				purse.setItem(slot, new ItemStack(Material.EMERALD_BLOCK,64));
+			} else if (rem >= 64) {
+				bump = 64;
+				purse.setItem(slot, new ItemStack(Material.EMERALD,64));
+			} else {
+				bump = (int)rem;
+				purse.setItem(slot, new ItemStack(Material.EMERALD, bump));
+			}
+			rem -= bump;
+		}
+		return purse;
+	}
+	
+	/*
+	 * Create a short inventory offering money to the player. The money is not
+	 * taken from the player's account; it's new money. Note that if the player's
+	 * loans are maxed out, we still open the window so he can repay the loan.
+	 */
+	public Inventory setLoan(double maxLoan) {
+		purse = Bukkit.getServer().createInventory(this, 18, "Loans & Payments");
+		isCash = false;
+		
+		long offered = (long)(maxLoan - loans);
+		if (offered < 0)
+			offered = 0;
+		if (offered > 2496)
+			offered = 2496;
+		
+		// Add the amount offered to account's current loans
+		// whatever remains after the player's access will be deducted from the outstanding loan,
+		// see InventoryCloseEvent for details.
+		loans += offered;
+		
+		for (int slot = 0; offered > 0; slot++) {
+			int bump = 0;
+			if (offered >= 576) {
+				bump = 576;
+				purse.setItem(slot, new ItemStack(Material.EMERALD_BLOCK,64));
+			} else if (offered >= 64) {
+				bump = 64;
+				purse.setItem(slot, new ItemStack(Material.EMERALD,64));
+			} else {
+				bump = (int)offered;
+				purse.setItem(slot, new ItemStack(Material.EMERALD, bump));
+			}
+			offered -= bump;
+		}		
+		return purse;
+	}
+	
+	public void discard() {
+		// the inventory associated with this account is no longer open/valid
+		purse = null;
 	}
 	
 	/*
@@ -57,10 +145,6 @@ public class Account implements InventoryHolder {
 	public void openAccount() {
 		if (configFile == null) {
 			configFile = new File(BankMaster.ourDataFolder, uuid + ".yml");
-			if (!configFile.exists()) {
-				// Maybe there's a config using player name
-				configFile = new File(BankMaster.ourDataFolder, name + ".yml");
-			}
 		}
 		if (config == null) {
 			config = YamlConfiguration.loadConfiguration(configFile);
@@ -77,42 +161,38 @@ public class Account implements InventoryHolder {
 	/*
 	 * Write the account - saves the current account data to disk
 	 */
-	public void pushAccount() {
-		if (configFile == null) {
-			// this account was never opened, so nothing to do
-			return;
+	public void pushAccount(CommandSender sender) {
+
+		if (configFile != null) {	//nothing to do if configFile never opened
+		
+			// update config file values
+			config.set(keyName, name);
+			config.set(keyUpdate, lastUpdate);
+			config.set(keyMoney, String.format("%.2f", money));
+			config.set(keyLoans, String.format("%.2f", loans));
+			config.set(keyXP, XP);
+	
+	        try {
+				config.save(configFile);
+			} catch (IOException e) {
+				Bukkit.getLogger().warning(e.getMessage());
+				sender.sendMessage(ChatColor.RED + "Account file could not be updated");
+			}
 		}
-		
-		// update config file values
-		config.set(keyName, name);
-		config.set(keyUpdate, lastUpdate);
-		config.set(keyMoney, money);
-		config.set(keyLoans, loans);
-		config.set(keyXP, XP);
-
-		// during transition phase, the active File might be based on player name
-		configFile = new File(BankMaster.ourDataFolder, uuid + ".yml");
-		
-		try {
-	        config.save(configFile);
-	    } catch (IOException ex) {
-	        BankMaster.plugin.getLogger().log(Level.SEVERE, "Could not save account to " + configFile, ex);
-	    }
-
 	}
 	
 	// general handling functions
 	
-	public boolean isFor(String suid) {
-		return (uuid.equals(suid) );
+	public boolean isFor(UUID uid) {
+		return (uuid.equals(uid) );
 	}
 	
-	public void clear() {
+	public void setEmpty() {
 		money = 0;
 		loans = 0;
 	}
 	
-	public void clearXP() {
+	public void setEmptyXP() {
 		XP = 0;
 	}
 	
@@ -128,25 +208,20 @@ public class Account implements InventoryHolder {
 		return false;
 	}
 	
-	// Loan primitives
-	public void borrow(double amt) {
-		money += amt;
-		loans += amt;
-	}
-	
-	public boolean repay(double amt) {
-		if (amt <= loans) {
-			money -= amt;
-			loans -= amt;
-			return true;
-		}
-		return false;
-	}
-	
 	public void audit(CommandSender sender) {
 		// Display account status
 		sender.sendMessage("Balance: " + money);
 		sender.sendMessage("Total Loans: " + loans);
 	}
+	
+	/*
+	public void setBase() {
+		base = money;
+	}
+	
+	public double getBase() {
+		return base;
+	}
+	*/
 	
 }

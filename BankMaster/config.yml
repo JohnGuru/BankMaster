@@ -3,12 +3,12 @@
 #     maxMoney : maximum amount a player can have
 #     interestDays : days to double the account, 0 for no interest or 1-365
 #     maxLoans : total loans a player can have oustanding
-#     maxSingleLoan : maximum amount a player can be loaned at one time
 
 bank:
-  moneySign: money bank
-  XPSign: xp bank
+  moneySign: Money Bank
+  XPSign: XP Bank
+  ATMSign: ATM
+  LoanSign: Loans
   maxMoney: 10000000
   interestDays: 180
   maxLoans: 10000
-  maxSingleLoan: 500
