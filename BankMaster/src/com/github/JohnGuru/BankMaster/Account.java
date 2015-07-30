@@ -145,6 +145,8 @@ public class Account implements InventoryHolder {
 	public void openAccount() {
 		if (configFile == null) {
 			configFile = new File(BankMaster.ourDataFolder, uuid + ".yml");
+			// String status = configFile.exists() ? " exists" : " missing";
+			// Bukkit.getLogger().info("configFile " + configFile.getName() + status);
 		}
 		if (config == null) {
 			config = YamlConfiguration.loadConfiguration(configFile);
@@ -154,9 +156,11 @@ public class Account implements InventoryHolder {
 		money = config.getDouble(keyMoney);
 		loans = config.getDouble(keyLoans);
 		XP = config.getInt(keyXP);
-				
+		/*
+		String msg = String.format("opened %s, money %.2f, loans %.2f", name, money, loans);
+		Bukkit.getLogger().info(msg);
+		*/
 	}
-	
 
 	/*
 	 * Write the account - saves the current account data to disk
@@ -168,8 +172,8 @@ public class Account implements InventoryHolder {
 			// update config file values
 			config.set(keyName, name);
 			config.set(keyUpdate, lastUpdate);
-			config.set(keyMoney, String.format("%.2f", money));
-			config.set(keyLoans, String.format("%.2f", loans));
+			config.set(keyMoney, money);
+			config.set(keyLoans, loans);
 			config.set(keyXP, XP);
 	
 	        try {
