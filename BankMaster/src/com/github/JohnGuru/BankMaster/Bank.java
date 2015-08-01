@@ -1,10 +1,11 @@
 package com.github.JohnGuru.BankMaster;
 
+import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.logging.Level;
-
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
@@ -12,17 +13,19 @@ import org.bukkit.entity.Player;
 
 public class Bank {
 	private List<Account> accounts;
-	double	rate;			// interest rate, money*rate
-	double	maxMoney;		// max size of a bank account
-	double	maxLoans;		// total amount the bank can loan
+	private double	rate;			// interest rate, money*rate
+	private BigDecimal maxMoney;		// max size of a bank account
+	private BigDecimal maxLoans;		// total amount the bank can loan
+	private MathContext context;		// standard math context
 
 	public Bank() {
 		// Initialize the bank management parameters to defaults
 		// Custom values will be set from a config.yml later
 		accounts = new LinkedList<Account>();
 		rate = 0;			// by default, interest is disabled
-		maxLoans = 0;		// by default, the bank can't loan money
-		maxMoney = 10000000;  // default max account size
+		maxLoans = BigDecimal.ZERO;		// by default, the bank can't loan money
+		maxMoney = new BigDecimal("10000000");  // default max account size
+		context = new MathContext(12,RoundingMode.HALF_UP);
 	}
 	
 	// Methods to set custom bank behavior from a config.yml
@@ -49,22 +52,43 @@ public class Bank {
 		return true;
 	}
 	
-	public void setMaxMoney( double max ) {
-		if (max <= 100000000)
-			maxMoney = max;
+	public void setMaxMoney(String max) {
+		BigDecimal bdmax;
+		try {
+			bdmax = new BigDecimal(max);
+		}
+		catch (Exception e) {
+			Bukkit.getLogger().warning("config: maxMoney invalid number");
+			return;
+		}
+		
+		if (bdmax.compareTo(new BigDecimal("999999999")) < 0)
+			maxMoney = bdmax;
 		else
-			BankMaster.plugin.getLogger().log(Level.WARNING, "maxMoney exceeds 100,000,000");
+			Bukkit.getLogger().warning("maxMoney exceeds 999,999,999");
 	}
 	
-	public void setMaxLoans(double max) {
-		maxLoans = max;
+	public void setMaxLoans(String max) {
+		BigDecimal bdmax;
+		try {
+			bdmax = new BigDecimal(max);
+		}
+		catch (Exception e) {
+			Bukkit.getLogger().warning("config: maxLoans invalid number");
+			return;
+		}
+		
+		if (bdmax.compareTo(new BigDecimal("999999999")) < 0)
+			maxLoans = bdmax;
+		else
+			Bukkit.getLogger().warning("maxLoans exceeds 999,999,999");
 	}
 	
-	public double getMaxMoney() {
+	public BigDecimal getMaxMoney() {
 		return maxMoney;
 	}
 	
-	public double getMaxLoans() {
+	public BigDecimal getMaxLoans() {
 		return maxLoans;
 	}
 	
@@ -123,13 +147,15 @@ public class Bank {
 			if (a.lastUpdate > 0 && rate > 1.0) {
 				long periods = now - a.lastUpdate;
 				if (periods > 0) {
-					double oldamt = a.money;
-					a.money = oldamt * Math.pow(rate, periods);
-					if (a.money > maxMoney)
+					BigDecimal oldamt = a.money;
+					double newamt = oldamt.doubleValue() * Math.pow(rate, periods);
+					a.money = new BigDecimal(newamt, context);
+					a.money = a.money.setScale(Currency.getDecimals(), RoundingMode.HALF_UP);
+					if (a.money.compareTo(maxMoney) > 0)
 						a.money = maxMoney;
-					double interest = a.money - oldamt;
+					BigDecimal interest = a.money.subtract(oldamt);
 					
-					p.sendMessage(ChatColor.YELLOW + String.format("Interest applied: %.2f", interest));
+					p.sendMessage(ChatColor.YELLOW + "Interest applied: " + interest);
 					
 				}
 			}
@@ -159,11 +185,11 @@ public class Bank {
 	 *   unused balance of maxLoans, or, if more than maxSingleLoan,
 	 *   maxSingleLoan
 	 */
-	public int borrow(Account acct) {
-		double amt = maxLoans - acct.loans;
-		if (amt <= 0)
-			amt = 0;
-		return (int)amt;
+	public BigDecimal borrow(Account acct) {
+		BigDecimal amt = maxLoans.subtract(acct.loans);
+		if (amt.compareTo(BigDecimal.ZERO) < 0)
+			amt = BigDecimal.ZERO;
+		return amt;
 	}
 
 }

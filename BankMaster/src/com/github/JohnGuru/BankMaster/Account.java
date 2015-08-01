@@ -2,24 +2,24 @@ package com.github.JohnGuru.BankMaster;
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.UUID;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.Material;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
-import org.bukkit.inventory.ItemStack;
 
 public class Account implements InventoryHolder {
 	private String name;
 	private UUID uuid;
 	long	lastUpdate;	// getTime() value of date&time of last interest update
-	double	money;
-	double	loans;
+	BigDecimal money;
+	BigDecimal loans;
 	int		XP;
 	private Inventory purse;
 	private boolean isCash;
@@ -40,13 +40,20 @@ public class Account implements InventoryHolder {
 		name = pname;
 		uuid = uid;
 		lastUpdate = 0;
-		money = 0;
-		loans = 0;
+		money = BigDecimal.ZERO;
+		loans = BigDecimal.ZERO;
 		XP = 0;
 		config = null;
 		configFile = null;
 		purse = null;
 		isCash = true;
+	}
+	
+	/*
+	 * account holder
+	 */
+	public String getName() {
+		return name;
 	}
 	
 	/*
@@ -65,35 +72,12 @@ public class Account implements InventoryHolder {
 	 * 
 	 */
 	public Inventory setCash() {
-		purse = Bukkit.getServer().createInventory(this, 27, String.format("Account %.2f", money));
+		purse = Bukkit.getServer().createInventory(this, 27, String.format("Account " + money));
 		isCash = true;
 		
-		// Limit the displayed funds to 8 stacks of emerald blocks
-
 		// now load the inventory with a portion of the account
-		long rem = (long)money;
-		
-		if (rem > 4544L) /* 7 stacks of emerald blocks + 8 stacks of emeralds */
-			rem = 4544L;
-		
-		// remove the on-screen amount from the account's balance
-		money -= rem;
-		
-		// now fill 15 slots of inventory
-		for (int slot = 0; rem > 0; slot++) {
-			int bump = 0;
-			if (rem >= 576) {
-				bump = 576;
-				purse.setItem(slot, new ItemStack(Material.EMERALD_BLOCK,64));
-			} else if (rem >= 64) {
-				bump = 64;
-				purse.setItem(slot, new ItemStack(Material.EMERALD,64));
-			} else {
-				bump = (int)rem;
-				purse.setItem(slot, new ItemStack(Material.EMERALD, bump));
-			}
-			rem -= bump;
-		}
+		purse.setContents(Currency.toBlocks(money, 14));
+		money = money.subtract(Currency.valueOf(purse));
 		return purse;
 	}
 	
@@ -102,35 +86,22 @@ public class Account implements InventoryHolder {
 	 * taken from the player's account; it's new money. Note that if the player's
 	 * loans are maxed out, we still open the window so he can repay the loan.
 	 */
-	public Inventory setLoan(double maxLoan) {
+	public Inventory setLoan(BigDecimal maxLoan) {
 		purse = Bukkit.getServer().createInventory(this, 18, "Loans & Payments");
 		isCash = false;
 		
-		long offered = (long)(maxLoan - loans);
-		if (offered < 0)
-			offered = 0;
-		if (offered > 2496)
-			offered = 2496;
+		BigDecimal offered = maxLoan.subtract(loans);
+		BigDecimal limit = new BigDecimal("2496"); // not to overload the inventory
+		if (offered.compareTo(limit) > 0)
+			offered = limit;
+		if (offered.signum() < 0)
+			offered = BigDecimal.ZERO;
 		
 		// Add the amount offered to account's current loans
 		// whatever remains after the player's access will be deducted from the outstanding loan,
 		// see InventoryCloseEvent for details.
-		loans += offered;
-		
-		for (int slot = 0; offered > 0; slot++) {
-			int bump = 0;
-			if (offered >= 576) {
-				bump = 576;
-				purse.setItem(slot, new ItemStack(Material.EMERALD_BLOCK,64));
-			} else if (offered >= 64) {
-				bump = 64;
-				purse.setItem(slot, new ItemStack(Material.EMERALD,64));
-			} else {
-				bump = (int)offered;
-				purse.setItem(slot, new ItemStack(Material.EMERALD, bump));
-			}
-			offered -= bump;
-		}		
+		purse.setContents(Currency.toBlocks(offered, 9));
+		loans = loans.add(Currency.valueOf(purse));
 		return purse;
 	}
 	
@@ -145,22 +116,20 @@ public class Account implements InventoryHolder {
 	public void openAccount() {
 		if (configFile == null) {
 			configFile = new File(BankMaster.ourDataFolder, uuid + ".yml");
-			// String status = configFile.exists() ? " exists" : " missing";
-			// Bukkit.getLogger().info("configFile " + configFile.getName() + status);
 		}
 		if (config == null) {
 			config = YamlConfiguration.loadConfiguration(configFile);
 		}
 		// initialize account values from account.yml
 		lastUpdate = config.getLong(keyUpdate);
-		money = config.getDouble(keyMoney);
-		loans = config.getDouble(keyLoans);
+		money = new BigDecimal(config.getString(keyMoney));
+		loans = new BigDecimal(config.getString(keyLoans));
 		XP = config.getInt(keyXP);
-		/*
-		String msg = String.format("opened %s, money %.2f, loans %.2f", name, money, loans);
-		Bukkit.getLogger().info(msg);
-		*/
+		money = money.setScale(Currency.getDecimals(), RoundingMode.HALF_UP);
+		loans = loans.setScale(Currency.getDecimals(), RoundingMode.HALF_UP);
+
 	}
+	
 
 	/*
 	 * Write the account - saves the current account data to disk
@@ -170,10 +139,12 @@ public class Account implements InventoryHolder {
 		if (configFile != null) {	//nothing to do if configFile never opened
 		
 			// update config file values
+			money = money.setScale(Currency.getDecimals(), RoundingMode.HALF_UP);
+			loans = loans.setScale(Currency.getDecimals(), RoundingMode.HALF_UP);
 			config.set(keyName, name);
 			config.set(keyUpdate, lastUpdate);
-			config.set(keyMoney, money);
-			config.set(keyLoans, loans);
+			config.set(keyMoney, money.toPlainString());
+			config.set(keyLoans, loans.toPlainString());
 			config.set(keyXP, XP);
 	
 	        try {
@@ -192,21 +163,24 @@ public class Account implements InventoryHolder {
 	}
 	
 	public void setEmpty() {
-		money = 0;
-		loans = 0;
+		money = BigDecimal.ZERO;
+		loans = BigDecimal.ZERO;
 	}
 	
 	public void setEmptyXP() {
 		XP = 0;
 	}
 	
-	public void deposit(double amt) {
-		money += amt;
+	/*
+	 * Transaction based methods
+	 */
+	public void deposit(BigDecimal amt) {
+		money = money.add(amt);
 	}
 	
-	public boolean withdraw(double amt) {
-		if (money >= amt) {
-			money -= amt;
+	public boolean withdraw(BigDecimal amt) {
+		if (amt.compareTo(money) <= 0) {
+			money = money.subtract(amt);
 			return true;
 		}
 		return false;
@@ -217,15 +191,5 @@ public class Account implements InventoryHolder {
 		sender.sendMessage("Balance: " + money);
 		sender.sendMessage("Total Loans: " + loans);
 	}
-	
-	/*
-	public void setBase() {
-		base = money;
-	}
-	
-	public double getBase() {
-		return base;
-	}
-	*/
 	
 }

@@ -1,10 +1,9 @@
 package com.github.JohnGuru.BankMaster;
 
 import java.io.File;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Hashtable;
 import java.util.logging.Level;
 
 import org.bukkit.Bukkit;
@@ -45,7 +44,7 @@ public final class BankMaster extends JavaPlugin {
 	private boolean signListChanged; // if true, the list has to be written out
 	
 	// the currency collection identifies the types of currencies in use
-	public Map<Material,Double> currency; // Types of currency items and their scaling values
+	public Currency currency; // Types of currency items and their scaling values
 	
 	private static String money_sign;
 	private static final String default_money_sign = "Money Bank";
@@ -74,6 +73,10 @@ public final class BankMaster extends JavaPlugin {
 	private static final String maxMoney = "bank.maxMoney";
 	private static final String banksigns = "bank.signs";
 	
+	// config parameters for currency
+	private static final String currency_decimals = "bank.currency.decimals";
+	private static final String currency_denominations = "bank.currency.denominations";
+	
 	private static String bank_command = "bank";
 	private static String pay_command = "pay";
 	private static String audit = "audit";
@@ -100,16 +103,37 @@ public final class BankMaster extends JavaPlugin {
 		loans_sign = conf.getString(key_loansign, default_Loans_sign);
 		xp_sign    = conf.getString(key_xpsign, default_xp_sign);
 		
+		
+		// initialize currency items
+		currency = new Currency();
+		currency.setDecimals(conf.getInt(currency_decimals));
+		List<String> denoms = conf.getStringList(currency_denominations);
+		
+		boolean errors = false;
+		if (denoms.isEmpty()) {
+			getLogger().warning("config: No currency denominations");
+			errors = true;
+		}
+		for (String s : denoms) {
+			try {
+				currency.addDenomination(s);
+			} catch (Exception e) {
+				getLogger().warning("config: invalid denomination " + s);
+				errors = true;
+			}
+		}
+		
+		if (errors) {
+			getLogger().log(Level.SEVERE, "Invalid currency configuration, banking disabled.");
+			return;
+		}
+		
+		// initialize banking parameters
+		bank.setMaxMoney(conf.getString(maxMoney) );
+		bank.setMaxLoans(conf.getString(maxLoans) );
 		if ( !bank.setInterest(conf.getInt(interestDays)) ) {
 			getLogger().log(Level.SEVERE, "Invalid expression in " + interestDays);
 		}
-		bank.setMaxMoney(conf.getDouble(maxMoney) );
-		bank.setMaxLoans(conf.getDouble(maxLoans) );
-		
-		// initialize currency items
-		currency = new Hashtable<Material,Double>();
-		currency.put(Material.EMERALD_BLOCK, 9.0);
-		currency.put(Material.EMERALD, 1.0);
 		
 		// process sign list bank.signs
 		
@@ -233,7 +257,7 @@ public final class BankMaster extends JavaPlugin {
 				if (item == null)
 					return; // shouldn't happen but let's be safe
 				Material itemtype = item.getType();
-				if (itemtype == Material.AIR || currency.containsKey(itemtype))
+				if (itemtype == Material.AIR || Currency.contains(itemtype))
 					return;
 
 
@@ -256,28 +280,16 @@ public final class BankMaster extends JavaPlugin {
 				Account acct = (Account)ev.getInventory().getHolder();
 				
 				// tally the amount of cash in the top inventory
-				long onhand = 0;
+				BigDecimal onhand = Currency.valueOf(ev.getInventory());
 				
-				for (ItemStack item : ev.getInventory()) {
-					if (item != null)
-						switch (item.getType()) {
-						case EMERALD_BLOCK:
-							onhand += item.getAmount() * 9;
-							break;
-						case EMERALD:
-							onhand += item.getAmount();
-							break;
-						default:
-							break;
-						}
+				if (acct.isCashInventory()) {
+					acct.money = acct.money.add(onhand);
 				}
-				if (acct.isCashInventory())
-					acct.money += onhand;
 				else {
-					acct.loans -= onhand;
-					if (acct.loans < 0) {
-						acct.money -= acct.loans;
-						acct.loans = 0;
+					acct.loans = acct.loans.subtract(onhand);
+					if (acct.loans.signum() < 0) {
+						acct.money.subtract(acct.loans);
+						acct.loans = BigDecimal.ZERO;
 					}
 				}
 				acct.discard();
@@ -433,9 +445,13 @@ public final class BankMaster extends JavaPlugin {
 				sender.sendMessage(ChatColor.RED + args[1] + " is not a valid account or player not online");
 				return true;
 			}
-			double amt = Double.valueOf(args[2]);
-			if (amt <= 0) {
-				sender.sendMessage(ChatColor.RED + "Invalid amount, must be greater than 0");
+			BigDecimal amt;
+			amt = BigDecimal.ZERO;
+			try {
+				amt = new BigDecimal(args[2]);
+			}
+			catch (NumberFormatException e) {
+				sender.sendMessage(ChatColor.RED + "Invalid number format");
 				return true;
 			}
 			if (args[0].equalsIgnoreCase(set_cmd)) {
@@ -448,8 +464,10 @@ public final class BankMaster extends JavaPlugin {
 				acct.audit(sender);
 			}
 			else if (args[0].equalsIgnoreCase(rem_cmd)) {
-				acct.withdraw(amt);
-				acct.audit(sender);
+				if (acct.withdraw(amt))
+					acct.audit(sender);
+				else
+					sender.sendMessage(ChatColor.RED + "Insufficient funds");
 			}
 			else // invalid command
 				return false;

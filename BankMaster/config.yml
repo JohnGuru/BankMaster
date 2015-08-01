@@ -9,6 +9,13 @@ bank:
   XPSign: XP Bank
   ATMSign: ATM
   LoanSign: Loans
+  currency:
+    name: 'Emerald'
+    plural: Emeralds
+    decimals: 2
+    denominations:
+    - EMERALD_BLOCK,9
+    - EMERALD,1
   maxMoney: 10000000
   interestDays: 180
   maxLoans: 10000
