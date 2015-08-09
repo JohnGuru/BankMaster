@@ -30,14 +30,18 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.metadata.MetadataValue;
+import org.bukkit.plugin.ServicePriority;
+import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.java.JavaPlugin;
+
+import net.milkbowl.vault.economy.Economy;
 
 public final class BankMaster extends JavaPlugin {
 	public static File ourDataFolder;
 	public static JavaPlugin plugin;
 	
 	// the bank object collects functionality applying to all accounts
-	public Bank bank = null;
+	public static Bank bank = null;
 	
 	// the signList gives the world locations of all active bank signs
 	public ArrayList<String> signList;
@@ -105,6 +109,7 @@ public final class BankMaster extends JavaPlugin {
 		
 		
 		// initialize currency items
+		
 		currency = new Currency();
 		currency.setDecimals(conf.getInt(currency_decimals));
 		List<String> denoms = conf.getStringList(currency_denominations);
@@ -129,11 +134,18 @@ public final class BankMaster extends JavaPlugin {
 		}
 		
 		// initialize banking parameters
+		
 		bank.setMaxMoney(conf.getString(maxMoney) );
 		bank.setMaxLoans(conf.getString(maxLoans) );
 		if ( !bank.setInterest(conf.getInt(interestDays)) ) {
 			getLogger().log(Level.SEVERE, "Invalid expression in " + interestDays);
 		}
+		
+		// hook to Vault
+		
+		if (!setupEconomy() ) {
+            getLogger().warning("Vault plugin not found, bank access may be limited");
+        }
 		
 		// process sign list bank.signs
 		
@@ -166,6 +178,19 @@ public final class BankMaster extends JavaPlugin {
 
 	}
 	
+	
+	// Hook to Vault plugin service
+
+	private boolean setupEconomy() {
+        if (getServer().getPluginManager().getPlugin("Vault") == null) {
+            return false;
+        }
+        final ServicesManager sm = getServer().getServicesManager();
+        sm.register(Economy.class, new VaultServer(), this, ServicePriority.Highest);
+        getLogger().info("Registered Vault interface.");
+        return true;
+    }
+
 	@Override
 	public void onDisable() {
 		
@@ -341,7 +366,7 @@ public final class BankMaster extends JavaPlugin {
 	 */
 	private void MoneyBank(Player p) {
 		// Access the required account. If none exists, we get an account with zero contents
-		Account a = bank.getAccount(p);
+		Account a = bank.getUpdatedAccount(p);
 				
 		// now display the space and let the user update it
 		// InventoryView workspace = p.openInventory(work);

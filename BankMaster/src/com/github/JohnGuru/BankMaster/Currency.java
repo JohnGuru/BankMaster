@@ -24,15 +24,15 @@ public class Currency {
 	
 	private static List<CurrencyItem> denoms;
 	private static int decimals;
-//	private static String unit_name;
-//	private static String plural_name;
-	private static MathContext context;
+	private static String unit_name;
+	private static String plural_name;
+	public static MathContext context; // used in VaultServer
 	
 	public Currency() {
 		denoms = new LinkedList<CurrencyItem>();
 		decimals = 0;
-//		unit_name = "unit";
-//		plural_name = "units";
+		unit_name = "unit";
+		plural_name = "units";
 		context = new MathContext(12, RoundingMode.HALF_UP);
 	}
 	
@@ -44,7 +44,7 @@ public class Currency {
 	public static int getDecimals() {
 		return decimals;
 	}
-/*	
+	
 	public static void setName(String for_one) {
 		unit_name = new String(for_one);
 		plural_name = new String(for_one);
@@ -59,10 +59,10 @@ public class Currency {
 		return unit_name;
 	}
 	
-	public static String getPluralName() {
+	public static String getPlural() {
 		return plural_name;
 	}
-	*/
+
 	
 	/*
 	 * addDenomination: accepts a string of the form "name,9"

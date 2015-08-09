@@ -122,8 +122,8 @@ public class Account implements InventoryHolder {
 		}
 		// initialize account values from account.yml
 		lastUpdate = config.getLong(keyUpdate);
-		money = new BigDecimal(config.getString(keyMoney));
-		loans = new BigDecimal(config.getString(keyLoans));
+		money = new BigDecimal(config.getString(keyMoney,"0.0"));
+		loans = new BigDecimal(config.getString(keyLoans,"0.0"));
 		XP = config.getInt(keyXP);
 		money = money.setScale(Currency.getDecimals(), RoundingMode.HALF_UP);
 		loans = loans.setScale(Currency.getDecimals(), RoundingMode.HALF_UP);
@@ -151,7 +151,8 @@ public class Account implements InventoryHolder {
 				config.save(configFile);
 			} catch (IOException e) {
 				Bukkit.getLogger().warning(e.getMessage());
-				sender.sendMessage(ChatColor.RED + "Account file could not be updated");
+				if (sender != null)
+					sender.sendMessage(ChatColor.RED + "Account file could not be updated");
 			}
 		}
 	}

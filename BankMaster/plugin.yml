@@ -1,6 +1,6 @@
 name: BankMaster
 main: com.github.JohnGuru.BankMaster.BankMaster
-version: 1.5
+version: 1.6
 description: General manager for bank accounts
 author: JohnGuru
 softdepend: [Multiverse-Core, Multiverse-NetherPortals]

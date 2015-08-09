@@ -99,7 +99,9 @@ public class Bank {
 	 * 		otherwise reads the account.yml file and adds to the list
 	 */
 	
-	private Account findAccount(Player p) {
+	public Account getAccount(Player p) {
+		if (p == null)
+			return null; // safety
 		// If the account is in memory, return it
 		for ( Account a : accounts) {
 			if (a.isFor(p.getUniqueId()))
@@ -122,15 +124,15 @@ public class Bank {
 		Player p = Bukkit.getPlayer(name);
 		if (p == null)
 			return null;
-		return findAccount(p);
+		return getAccount(p);
 	}
 	
 	/*
-	 * getAccount called for a Player
+	 * getUpdatedAccount - apply accrued interest
 	 */
-	public Account getAccount(Player p) {
+	public Account getUpdatedAccount(Player p) {
 
-		Account a = findAccount(p);
+		Account a = getAccount(p);
 		if (a != null) {
 
 			// update Account with pending interest
