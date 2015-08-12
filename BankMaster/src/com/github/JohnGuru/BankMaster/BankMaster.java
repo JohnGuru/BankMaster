@@ -313,7 +313,7 @@ public final class BankMaster extends JavaPlugin {
 				else {
 					acct.loans = acct.loans.subtract(onhand);
 					if (acct.loans.signum() < 0) {
-						acct.money.subtract(acct.loans);
+						acct.money = acct.money.subtract(acct.loans);
 						acct.loans = BigDecimal.ZERO;
 					}
 				}

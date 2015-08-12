@@ -22,6 +22,7 @@ to the player's bank account does not repay the loan. Payments can only be
 transacted at a Loan sign.
 
 XP banking is planned but not yet supported.
+Command /bank pay <player> <amount> is planned but not yet supported.
 
 Note that admin bankmaster commands (set,add,rem) can accept player names
 instead of UUIDs, but the command will be rejected unless the player is
